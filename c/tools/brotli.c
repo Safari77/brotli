@@ -1024,11 +1024,28 @@ static BROTLI_BOOL OpenFiles(Context* context) {
   return is_ok;
 }
 
+// fsync FILE, EINVAL errno is okay, other ones not; retries EINTR .
+static BROTLI_BOOL fsync_file(FILE *f) {
+  int ret;
+
+  if (fflush(f) != 0) return BROTLI_FALSE;
+  do {
+    ret = fsync(fileno(f));
+  } while ((ret == -1) && (errno == EINTR));
+  if (ret == 0 || (errno == EINVAL)) return BROTLI_TRUE;
+  return BROTLI_FALSE;
+}
+
 static BROTLI_BOOL CloseFiles(Context* context, BROTLI_BOOL rm_input,
                               BROTLI_BOOL rm_output) {
   BROTLI_BOOL is_ok = BROTLI_TRUE;
   if (!context->test_integrity && context->fout) {
-    if (fclose(context->fout) != 0) {
+    if (fsync_file(context->fout) != BROTLI_TRUE) {
+      fprintf(stderr, "fsync failed [%s]: %s\n",
+              PrintablePath(context->current_output_path), strerror(errno));
+      is_ok = BROTLI_FALSE;
+    }
+    if ((fclose(context->fout) != 0) || !is_ok) {
       if (is_ok) {
         fprintf(stderr, "fclose failed [%s]: %s\n",
                 PrintablePath(context->current_output_path), strerror(errno));
