@@ -8,33 +8,31 @@
 
 #include <brotli/encode.h>
 #include <brotli/shared_dictionary.h>
-#include <brotli/types.h>
-
-#include <stdlib.h>  /* free, malloc */
-#include <string.h>  /* memcpy, memset */
 
 #include "../common/constants.h"
 #include "../common/context.h"
 #include "../common/platform.h"
 #include "../common/version.h"
-#include "backward_references.h"
 #include "backward_references_hq.h"
+#include "backward_references.h"
 #include "bit_cost.h"
 #include "brotli_bit_stream.h"
-#include "compress_fragment.h"
+#include "command.h"
+#include "compound_dictionary.h"
 #include "compress_fragment_two_pass.h"
+#include "compress_fragment.h"
 #include "dictionary_hash.h"
 #include "encoder_dict.h"
-#include "entropy_encode.h"
 #include "fast_log.h"
 #include "hash.h"
 #include "histogram.h"
 #include "memory.h"
 #include "metablock.h"
-#include "prefix.h"
-#include "state.h"
+#include "params.h"
 #include "quality.h"
 #include "ringbuffer.h"
+#include "state.h"
+#include "static_init.h"
 #include "utf8_util.h"
 #include "write_bits.h"
 
@@ -748,6 +746,10 @@ static void BrotliEncoderInitState(BrotliEncoderState* s) {
 
 BrotliEncoderState* BrotliEncoderCreateInstance(
     brotli_alloc_func alloc_func, brotli_free_func free_func, void* opaque) {
+  BROTLI_BOOL healthy = BrotliEncoderEnsureStaticInit();
+  if (!healthy) {
+    return 0;
+  }
   BrotliEncoderState* state = (BrotliEncoderState*)BrotliBootstrapAlloc(
       sizeof(BrotliEncoderState), alloc_func, free_func, opaque);
   if (state == NULL) {
