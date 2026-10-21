@@ -875,12 +875,6 @@ static void CopyStat(const char* input_path, const char* output_path,
   if (stat(input_path, &statbuf) != 0) {
     return;
   }
-  /* Flush any stdio-buffered output before setting timestamps; otherwise the
-     buffered write() that fclose() issues would clobber the atime/mtime we
-     just set. */
-  if (fflush(fout) != 0) {
-    return;
-  }
   res = CopyTimeStat(&statbuf, output_path, fout);
   res = fchmod(fd, statbuf.st_mode & (S_IRWXU | S_IRWXG | S_IRWXO));
   if (res != 0) {
@@ -1044,8 +1038,8 @@ static BROTLI_BOOL OpenFiles(Context* context) {
   return is_ok;
 }
 
-// fsync FILE, EINVAL errno is okay, other ones not; retries EINTR .
-static BROTLI_BOOL fsync_file(FILE *f) {
+// fflush and fsync FILE, EINVAL errno is okay, other ones not; retries EINTR .
+static BROTLI_BOOL fflush_fsync_file(FILE *f) {
   int ret;
 
   if (fflush(f) != 0) return BROTLI_FALSE;
@@ -1060,14 +1054,16 @@ static BROTLI_BOOL CloseFiles(Context* context, BROTLI_BOOL rm_input,
                               BROTLI_BOOL rm_output) {
   BROTLI_BOOL is_ok = BROTLI_TRUE;
   if (!context->test_integrity && context->fout) {
-    if (fsync_file(context->fout) != BROTLI_TRUE) {
-      fprintf(stderr, "fsync failed [%s]: %s\n",
+    /* Flush and fsync before the metadata copy, so a failed write is reported. */
+    if (fflush_fsync_file(context->fout) != BROTLI_TRUE) {
+      fprintf(stderr, "failed to write output [%s]: %s\n",
               PrintablePath(context->current_output_path), strerror(errno));
       is_ok = BROTLI_FALSE;
     }
     /* Apply metadata via the still-open fd, before close, to close the TOCTOU
        window between fclose() and the metadata syscalls. */
-    if (!rm_output && context->copy_stat && context->current_output_path) {
+    if (is_ok && !rm_output && context->copy_stat &&
+        context->current_output_path) {
       CopyStat(context->current_input_path, context->current_output_path,
                context->fout);
     }
@@ -1092,7 +1088,7 @@ static BROTLI_BOOL CloseFiles(Context* context, BROTLI_BOOL rm_input,
       is_ok = BROTLI_FALSE;
     }
   }
-  if (rm_input && context->current_input_path) {
+  if (rm_input && is_ok && context->current_input_path) {
     unlink(context->current_input_path);
   }
 
